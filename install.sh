@@ -33,8 +33,8 @@ while :; do
 done
 
 while :; do
-    read -rp "${BLUE}Hostname (mặc định: invincible): ${NC}" INPUT_HOST
-    HOSTNAME=${INPUT_HOST:-invincible}
+    read -rp "${BLUE}Hostname (mặc định: tyno): ${NC}" INPUT_HOST
+    HOSTNAME=${INPUT_HOST:-tyno}
     [[ "$HOSTNAME" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$ ]] || { warn "Hostname không hợp lệ!"; continue; }
     break
 done
