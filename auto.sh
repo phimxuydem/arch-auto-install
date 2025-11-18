@@ -126,55 +126,89 @@ warn "TẤT CẢ DỮ LIỆU TRÊN $DISK SẼ BỊ XÓA!"
 read -rp "Gõ YES để đồng ý: " c; [[ "$c" = "YES" ]] || error "Hủy."
 
 # ---------- 4. Partition + Swap 8GB (safe)
-info "Đang phân vùng EFI 512M + Swap 8G + Root còn lại..."
+info "Chuẩn bị phân vùng (EFI/BIO S) + Swap 8G + Root còn lại..."
+# detect boot mode (UEFI vs BIOS)
+if [ -d /sys/firmware/efi/efivars ]; then
+    BOOT_MODE=uefi
+    info "Phát hiện hệ thống boot: UEFI"
+else
+    BOOT_MODE=bios
+    warn "Không tìm thấy EFI vars — hệ đang ở chế độ BIOS/Legacy. Sẽ tạo BIOS boot partition."
+fi
+
 # ensure disk is clean
 wipefs -af "$DISK" 2>/dev/null || warn "wipefs gặp lỗi nhưng tiếp tục..."
 sgdisk -Z "$DISK" 2>/dev/null || true
 
-# create partitions: EFI 512M, Swap 8G, rest root
-sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI"   "$DISK"
-sgdisk -n 2:0:+8G   -t 2:8200 -c 2:"Swap"  "$DISK"
-sgdisk -n 3:0:0     -t 3:8300 -c 3:"Root"  "$DISK"
+# create partitions depending on boot mode
+if [[ "$BOOT_MODE" == "uefi" ]]; then
+    sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI"   "$DISK"
+    sgdisk -n 2:0:+8G   -t 2:8200 -c 2:"Swap"  "$DISK"
+    sgdisk -n 3:0:0     -t 3:8300 -c 3:"Root"  "$DISK"
+else
+    # BIOS boot partition GUID for GPT
+    BIOS_GUID=21686148-6449-6E6F-744E-656564454649
+    sgdisk -n 1:0:+2M -t 1:${BIOS_GUID} -c 1:"BIOSBOOT" "$DISK"
+    sgdisk -n 2:0:+8G   -t 2:8200 -c 2:"Swap"  "$DISK"
+    sgdisk -n 3:0:0     -t 3:8300 -c 3:"Root"  "$DISK"
+fi
 
-# handle nvme naming
-if [[ "$DISK" == *nvme* ]]; then p="p"; else p=""; fi
-EFI="${DISK}${p}1" SWAP="${DISK}${p}2" ROOT="${DISK}${p}3"
+# handle partition name suffix (nvme/mmcblk end with digit)
+if [[ "$DISK" =~ [0-9]$ ]]; then p="p"; else p=""; fi
+if [[ "$BOOT_MODE" == "uefi" ]]; then
+    EFI="${DISK}${p}1"
+    SWAP="${DISK}${p}2"
+    ROOT="${DISK}${p}3"
+else
+    BIOSBOOT="${DISK}${p}1"
+    SWAP="${DISK}${p}2"
+    ROOT="${DISK}${p}3"
+fi
 
 # wait for kernel to refresh partitions
 sleep 1
 partprobe "$DISK" || true
 sleep 1
 
-info "Format EFI, Swap, Root..."
+info "Format partition(s), swap, root..."
 # unmount any residual or mounted partitions (defensive)
 umount -R /mnt 2>/dev/null || true
 swapoff -a 2>/dev/null || true
-for pt in "$EFI" "$SWAP" "$ROOT"; do umount "$pt" 2>/dev/null || true; done
+for pt in "${EFI:-}" "${BIOSBOOT:-}" "${SWAP:-}" "${ROOT:-}"; do
+    [[ -n "$pt" ]] && umount "$pt" 2>/dev/null || true
+done
 
-# Format
-mkfs.fat -F32 "$EFI"
+# Format (do not format BIOS boot partition)
+if [[ "$BOOT_MODE" == "uefi" ]]; then
+    mkfs.fat -F32 "$EFI"
+fi
 mkswap "$SWAP" && swapon "$SWAP"
 mkfs.ext4 -F "$ROOT"
 
-# mount root & efi
+# mount root & efi (if present)
 mount "$ROOT" /mnt
 # ensure /mnt/etc exists before genfstab later
 mkdir -p /mnt/etc
-mount --mkdir "$EFI" /mnt/boot/efi
+if [[ "$BOOT_MODE" == "uefi" ]]; then
+    mount --mkdir "$EFI" /mnt/boot/efi
+else
+    mkdir -p /mnt/boot
+fi
 
 # generate fstab (now /mnt/etc exists)
 genfstab -U /mnt > /mnt/etc/fstab || warn "genfstab gặp vấn đề — nhưng tiếp tục."
 
 # ---------- 5. Pacstrap
 info "Pacstrap base system..."
-pacstrap -K /mnt base base-devel linux linux-firmware linux-headers git vim sudo networkmanager polkit seatd intel-ucode amd-ucode || warn "pacstrap gặp lỗi, kiểm tra logs"
+pacstrap -K /mnt base base-devel linux linux-firmware linux-headers git vim sudo networkmanager polkit seatd intel-ucode amd-ucode efibootmgr dosfstools grub || warn "pacstrap gặp lỗi, kiểm tra logs"
 
 # ---------- 6. Prepare chroot script (improved)
 cat > /mnt/install.sh <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
-export USERNAME HOSTNAME USER_PASS ROOT_PASS TIMEZONE LANG_CODE KEYMAP
+# Environment expected from outside: USERNAME HOSTNAME USER_PASS ROOT_PASS TIMEZONE LANG_CODE KEYMAP DISK BOOT_MODE ROOT
+export USERNAME HOSTNAME USER_PASS ROOT_PASS TIMEZONE LANG_CODE KEYMAP DISK BOOT_MODE ROOT
 
 # Enable multilib if commented (cho lib32)
 if grep -q '^\s*#\s*\[multilib\]' /etc/pacman.conf; then
@@ -200,8 +234,17 @@ cat > /etc/hosts <<EOS
 127.0.1.1   $HOSTNAME.localdomain $HOSTNAME
 EOS
 
+# Ensure groups exist (guard for 'seat')
+for g in wheel audio video seat; do
+    if ! getent group "$g" >/dev/null 2>&1; then
+        groupadd -r "$g" || true
+    fi
+done
+
 # Create user & sudoers
-useradd -m -G wheel,audio,video,seat "$USERNAME"
+if ! id -u "$USERNAME" >/dev/null 2>&1; then
+    useradd -m -G wheel,audio,video,seat "$USERNAME"
+fi
 echo "$USERNAME:$USER_PASS" | chpasswd
 echo "root:$ROOT_PASS" | chpasswd
 echo "%wheel ALL=(ALL:ALL) NOPASSWD: ALL" > /etc/sudoers.d/00-install
@@ -212,19 +255,42 @@ IS_VM=$(systemd-detect-virt 2>/dev/null || echo none)
 IS_VM=${IS_VM:-none}
 
 if [[ $IS_VM == "none" ]] && lspci | grep -iq 'VGA.*NVIDIA'; then
-    pacman -S --noconfirm --needed nvidia nvidia-utils lib32-nvidia-utils hyprland-nvidia nvidia-settings || true
-    sed -i 's/^MODULES=.*/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf || true
+    # Install nvidia packages only from official repos; AUR-only packages handled later via yay
+    pacman -S --noconfirm --needed nvidia nvidia-utils lib32-nvidia-utils nvidia-settings || true
+    # append nvidia modules only if MODULES exists; keep conservative approach
+    if grep -q '^MODULES=' /etc/mkinitcpio.conf; then
+        sed -i 's/^MODULES=.*/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf || true
+    fi
 else
     pacman -S --noconfirm --needed mesa lib32-mesa vulkan-icd-loader lib32-vulkan-icd-loader || true
 fi
 
-# Packages chính
-pacman -Syu --noconfirm --needed hyprland hyprpaper kitty wofi waybar mako pipewire wireplumber pipewire-pulse \
-    xdg-desktop-portal-hyprland ttf-jetbrains-mono-nerd zsh sddm archlinux-wallpaper python-pip || true
+# Install core packages from official repos (AUR handled later in user context)
+pacman -Syu --noconfirm --needed hyprland kitty wofi pipewire wireplumber pipewire-pulse xdg-desktop-portal-hyprland zsh sddm archlinux-wallpaper python-pip || true
 
 systemctl enable NetworkManager sddm seatd pipewire wireplumber pipewire-pulse || true
 
-# Tạo user env và cài AUR bằng yay (nếu cần)
+# Bootloader install
+if [[ "$BOOT_MODE" == "uefi" ]]; then
+    pacman -S --noconfirm --needed efibootmgr dosfstools || true
+    # install systemd-boot
+    bootctl --path=/boot install || true
+    ROOT_UUID=$(blkid -s UUID -o value "$ROOT" 2>/dev/null || true)
+    mkdir -p /boot/loader/entries
+    cat > /boot/loader/entries/arch.conf <<LOADER
+title   Arch Linux
+linux   /vmlinuz-linux
+initrd  /initramfs-linux.img
+options root=UUID=${ROOT_UUID} rw
+LOADER
+else
+    # BIOS -> install grub
+    pacman -S --noconfirm --needed grub || true
+    grub-install --target=i386-pc "$DISK" || true
+    grub-mkconfig -o /boot/grub/grub.cfg || true
+fi
+
+# Create user environment and install AUR packages using yay
 su - "$USERNAME" -s /bin/bash <<'ENDUSER'
 set -e
 export PATH="$HOME/.local/bin:$PATH"
@@ -236,10 +302,9 @@ if ! command -v yay &>/dev/null; then
     cd / && rm -rf /tmp/yay
 fi
 
-# cài wal-colors (ưu tiên AUR qua yay, fallback pip)
-if ! pacman -Q wal-colors &>/dev/null 2>&1; then
-    yay -S --noconfirm --needed wal-colors || pip install --user wal-colors pywal || true
-fi
+# install common AUR packages that may not be in official repos
+# adjust list to your preference; examples: hyprland-nvidia, ttf-jetbrains-mono-nerd, sddm-sugar-candy-git
+yay -S --noconfirm --needed wal-colors ttf-jetbrains-mono-nerd sddm-sugar-candy-git hyprland-nvidia || true
 
 # clone config repo (fallback if exists)
 if git clone --depth 1 https://github.com/mkhmtolzhas/Invincible-Dots.git /tmp/Invincible-Dots 2>/dev/null; then
@@ -252,10 +317,7 @@ fi
 wal -i /usr/share/backgrounds/archlinux/archwave.png || true
 ENDUSER
 
-# SDDM theme: cài bằng yay nếu cần
-if ! pacman -Q sddm-sugar-candy-git &>/dev/null 2>&1; then
-    su - "$USERNAME" -s /bin/bash -c "yay -S --noconfirm sddm-sugar-candy-git" || true
-fi
+# SDDM theme: optionally installed in user context via yay earlier
 
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/autologin.conf <<SDDM
@@ -271,13 +333,18 @@ DisplayServer=wayland
 SDDM
 
 # VM & NVIDIA env shims
-[[ $IS_VM != "none" ]] && echo 'export WLR_NO_HARDWARE_CURSORS=1' >> /home/$USERNAME/.zshrc
-[[ $IS_VM == "none" ]] && lspci | grep -iq 'VGA.*NVIDIA' && cat >> /home/$USERNAME/.zshrc <<NV
+if [[ $IS_VM != "none" ]]; then
+    echo 'export WLR_NO_HARDWARE_CURSORS=1' >> /home/$USERNAME/.zshrc
+fi
+if [[ $IS_VM == "none" ]] && lspci | grep -iq 'VGA.*NVIDIA'; then
+    cat >> /home/$USERNAME/.zshrc <<NV
 export GBM_BACKEND=nvidia-drm
 export __GLX_VENDOR_LIBRARY_NAME=nvidia
 export LIBVA_DRIVER_NAME=nvidia
 export WLR_RENDERER=vulkan
 NV
+fi
+chown $USERNAME:$USERNAME /home/$USERNAME/.zshrc || true
 
 chsh -s /usr/bin/zsh "$USERNAME" || true
 mkinitcpio -P || true
@@ -291,6 +358,7 @@ arch-chroot /mnt env \
     USERNAME="$USERNAME" HOSTNAME="$HOSTNAME" \
     USER_PASS="$USER_PASS" ROOT_PASS="$ROOT_PASS" \
     TIMEZONE="$TIMEZONE" LANG_CODE="$LANG_CODE" KEYMAP="$KEYMAP" \
+    DISK="$DISK" BOOT_MODE="$BOOT_MODE" ROOT="$ROOT" \
     /install.sh || warn "arch-chroot hoặc install.sh có lỗi — kiểm tra đầu ra."
 
 # cleanup
