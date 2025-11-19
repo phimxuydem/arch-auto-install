@@ -327,6 +327,11 @@ chmod 440 /etc/sudoers.d/00-install
 IS_VM=$(systemd-detect-virt 2>/dev/null || echo none)
 IS_VM=${IS_VM:-none}
 
+# Chỉ hỗ trợ máy thật (none) và VirtualBox (oracle)
+if [[ $IS_VM != "none" ]] && [[ $IS_VM != "oracle" ]]; then
+    warn "VM không được hỗ trợ (chỉ hỗ trợ máy thật và VirtualBox). Phát hiện: $IS_VM. Script sẽ tiếp tục nhưng có thể gặp lỗi."
+fi
+
 if [[ $IS_VM == "none" ]] && lspci | grep -iq 'VGA.*NVIDIA'; then
     # Install nvidia packages only from official repos; AUR-only packages handled later via yay
     pacman -S --noconfirm --needed nvidia nvidia-utils lib32-nvidia-utils nvidia-settings || true
@@ -408,11 +413,7 @@ ENDUSER
 # SDDM theme: optionally installed in user context via yay earlier
 
 mkdir -p /etc/sddm.conf.d
-cat > /etc/sddm.conf.d/autologin.conf <<SDDM
-[Autologin]
-User=$USERNAME
-Session=hyprland.desktop
-
+cat > /etc/sddm.conf.d/kde_settings.conf <<SDDM
 [Theme]
 Current=sugar-candy
 
@@ -420,8 +421,18 @@ Current=sugar-candy
 DisplayServer=wayland
 SDDM
 
+# Tạo hyprland.desktop session
+mkdir -p /usr/share/wayland-sessions
+cat > /usr/share/wayland-sessions/hyprland.desktop <<DESKTOP
+[Desktop Entry]
+Name=Hyprland
+Comment=A dynamic tiling Wayland compositor
+Exec=Hyprland
+Type=Application
+DESKTOP
+
 # VM & NVIDIA env shims
-if [[ $IS_VM != "none" ]]; then
+if [[ $IS_VM == "oracle" ]]; then
     echo 'export WLR_NO_HARDWARE_CURSORS=1' >> /home/$USERNAME/.zshrc
 fi
 if [[ $IS_VM == "none" ]] && lspci | grep -iq 'VGA.*NVIDIA'; then
