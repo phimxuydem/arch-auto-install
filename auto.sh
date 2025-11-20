@@ -421,7 +421,7 @@ if ! command -v yay &>/dev/null; then
 fi
 
 # install AUR packages (best-effort)
-yay -S --noconfirm --needed wal-colors ttf-jetbrains-mono-nerd sddm-sugar-candy-git hyprland-nvidia || true
+yay -S --noconfirm --needed wal-colors ttf-jetbrains-mono-nerd catppuccin-sddm-mocha hyprland-nvidia || true
 
 # clone config repo if available
 if git clone --depth 1 https://github.com/mkhmtolzhas/Invincible-Dots.git /tmp/Invincible-Dots 2>/dev/null; then
@@ -438,7 +438,7 @@ ENDUSER
 mkdir -p /etc/sddm.conf.d
 cat > /etc/sddm.conf.d/kde_settings.conf <<SDDM
 [Theme]
-Current=sugar-candy
+Current=catppuccin-mocha
 
 [General]
 DisplayServer=wayland
