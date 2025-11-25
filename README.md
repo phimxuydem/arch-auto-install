@@ -1,156 +1,106 @@
 # Arch + Hyprland Auto Installation
 
-Tự động cài đặt **Arch Linux** với **Hyprland** (Wayland compositor) trên máy thật hoặc VirtualBox.
+Tự động cài Arch Linux với Hyprland (dành cho máy thật và VirtualBox). Có `auto.sh` (chung). `vm/virtualbox.sh` là script hỗ trợ chạy SAU khi `auto.sh` hoàn tất — chỉ dùng nếu cài trên VirtualBox và gặp vấn đề!
 
-## ✨ Tính Năng
+## ✨ Tính năng
+- Cài tự động từ ArchISO; hỗ trợ UEFI/BIOS
+- Phát hiện GPU và cài driver phù hợp (NVIDIA / Intel / AMD)
+- Hyprland + Kitty + Wofi, SDDM, NetworkManager
+- Kiểm tra log và khắc phục cơ bản
+- Script tối ưu cho VirtualBox: `vm/virtualbox.sh`
 
-- ✅ Cài đặt tự động từ ArchISO
-- ✅ Hỗ trợ UEFI/BIOS
-- ✅ Phát hiện GPU (NVIDIA/Intel/AMD)
-- ✅ Hyprland + Kitty + Wofi
-- ✅ SDDM login manager
-- ✅ NetworkManager
-- ✅ Kiểm tra lỗi toàn diện
-
-## ⚠️ Hỗ Trợ
+## ⚠️ Hỗ trợ
 
 | Hệ thống | Trạng thái |
-|----------|-----------|
-| Máy thật | ✅ Được hỗ trợ |
-| VirtualBox | ⚠️ Được hỗ trợ (xem lưu ý) |
-| KVM, QEMU, Hyper-V | ❌ Không hỗ trợ |
+|---------|-----------|
+| Máy thật | ✅ |
+| VirtualBox | ⚠️ (xem lưu ý) |
+| KVM/QEMU/Hyper-V | ❌ |
 
-### 🚨 Lưu ý VirtualBox & Hyprland
+### 🚨 VirtualBox & Hyprland
+- Hyprland cần GPU acceleration; VirtualBox có giới hạn cho Wayland.
+- Trước khi cài trên VM: bật `3D Acceleration`, cấp >=4GB RAM và >=2 CPU cores.
+- Trong hệ đích, cài Guest Additions: `pacman -S virtualbox-guest-utils`.
+- Nếu Hyprland không chạy: chuyển sang Openbox/Xfce hoặc dùng Xorg.
 
-Script chạy được trên VirtualBox, **nhưng Hyprland có thể không hoạt động** do:
-- Hyprland cần GPU acceleration cao
-- VirtualBox hỗ trợ kém Wayland
+`vm/virtualbox.sh` là trợ giúp hậu cài: cài guest utils (tuỳ hệ), bật service, in hướng dẫn cấu hình VM, và áp một số sửa lỗi/khuyến nghị riêng cho VirtualBox. Chạy nó chỉ khi đã chạy `auto.sh` và gặp lỗi hoặc khi muốn áp cấu hình VM bổ sung. Nó không thay thế `auto.sh` và không đảm bảo Hyprland chạy 100% trên mọi VM.
 
-**Để fix:**
-1. Bật **3D Acceleration** trong Settings → Display
-2. Cài **VirtualBox Guest Additions**: `pacman -S virtualbox-guest-utils`
-3. Cấp **4GB+ RAM** + **2+ cores**
-4. Nếu vẫn lỗi → Dùng **Openbox/Xfce** thay Hyprland
+## 📋 Yêu cầu
+- Arch ISO, 20GB+ (40GB khuyến nghị), internet, 2GB+ RAM (4GB+ cho VM)
 
-## 📋 Yêu Cầu
-
-- **Arch Linux ISO** (mới nhất)
-- **20GB+ dung lượng** (40GB an toàn)
-- **Internet ổn định** (Ethernet tốt hơn WiFi)
-- **2GB+ RAM**
-
-## 🚀 Cài Đặt
-
-### 1. Chuẩn Bị
-```bash
-# Boot ArchISO, kết nối Internet, sau đó:
-ping 8.8.8.8  # Kiểm tra kết nối
-```
-
-### 2. Tải Script
+## 🚀 Cài đặt nhanh
+1. Boot ArchISO và kiểm tra mạng: `ping 8.8.8.8`.
+2. Lấy script:
 ```bash
 git clone https://github.com/dhungx/arch-auto-install.git
 cd arch-auto-install
-chmod +x auto.sh
+chmod +x auto.sh vm/virtualbox.sh
 ```
-hoặc
-```bash
-curl -O https://raw.githubusercontent.com/dhungx/arch-auto-install/refs/heads/main/auto.sh
-chmod +x auto.sh
-```
-
-### 3. Chạy
+3) Chạy cài (mọi trường hợp):
 ```bash
 sudo ./auto.sh
 ```
+4) Nếu cài trên VirtualBox và gặp lỗi liên quan tới Wayland/Hyprland hoặc muốn áp thêm cấu hình Guest Additions, chạy (sau khi `auto.sh` hoàn tất):
+```bash
+sudo ./vm/virtualbox.sh
+```
 
-### 4. Trả Lời Câu Hỏi
+Trong quá trình cài bạn sẽ trả lời một số câu hỏi cơ bản. Ví dụ:
+
 | Câu hỏi | Mặc định | Ví dụ |
-|--------|---------|-------|
-| Ngôn ngữ | Tiếng Việt | 1=EN, 3=日本語 |
-| Múi giờ | Ho Chi Minh | 2=Seoul, 3=London |
-| Username | user | john, alice |
-| Hostname | tyno | myarch |
-| Password | (trống=mặc định) | - |
-| Ổ đĩa | - | **/dev/sda** (không phải /dev/sda1) |
+|---|---|---|
+| Ngôn ngữ | Tiếng Việt | `1=EN` |
+| Múi giờ | Ho Chi Minh | `2=Seoul` |
+| Tên người dùng | `user` | `john` |
+| Hostname | `tyno` | `myarch` |
+| Mật khẩu | (trống = mặc định) | — |
+| Thiết bị cài | — | `/dev/sda` (không phải `/dev/sda1`) |
 
-⚠️ **Xác nhận xóa**: Gõ `FORMAT /dev/sdX` rồi `YES`
+⚠️ Xác nhận format: gõ `FORMAT /dev/sdX` rồi `YES` để tiếp tục.
 
-### 5. Chờ & Khởi Động
-- Cài khoảng 15-30 phút
-- **Không interrupt** (Ctrl+C)
-- Xem log: `/tmp/arch-install-v3.log`
-- Gõ `reboot`
+## 🔧 Khắc phục nhanh
+- Boot lỗi: mount, `arch-chroot /mnt` → `mkinitcpio -P` → reboot
+- Quên password: `arch-chroot /mnt` → `passwd username`
+- NVIDIA lỗi: `pacman -S nvidia nvidia-utils` → `mkinitcpio -P`
+- Hyprland trên VM: đảm bảo Guest Additions, 3D bật, hoặc dùng DE nhẹ
 
-## ⌨️ Hyprland Shortcuts
+Log cài: `/tmp/arch-install-v3.log`
 
+## ⌨️ Phím tắt Hyprland (mặc định)
 ```
-Super + Return    → Terminal (Kitty)
-Super + D         → Launcher (Wofi)
-Super + C         → Close window
-Super + V         → Fullscreen
-Super + H/J/K/L   → Move focus
-Super + Arrow     → Resize
-```
-
-## 🔧 Khắc Phục Sự Cố
-
-### Boot không được?
-```bash
-# Boot ArchISO → Mount → Chroot → Rebuild
-mount /dev/sdX /mnt
-arch-chroot /mnt
-mkinitcpio -P
-exit && reboot
+Super + Return → Terminal (Kitty)
+Super + D      → Launcher (Wofi)
+Super + C      → Close window
+Super + V      → Fullscreen
+Super + H/J/K/L→ Move focus
+Super + Arrow  → Resize
 ```
 
-### Quên Password?
-```bash
-arch-chroot /mnt
-passwd username  # Hoặc 'passwd' cho root
-exit && reboot
-```
+## 📦 Gói cài (tóm tắt)
+- Base: `linux`, `base-devel`, `grub`, `efibootmgr`
+- Desktop: `hyprland`, `kitty`, `wofi`, `sddm`
+- Audio: `pipewire`, `wireplumber`
+- GPU: `nvidia` hoặc `mesa`
 
-### NVIDIA không hoạt động?
-```bash
-sudo pacman -S nvidia nvidia-utils
-sudo mkinitcpio -P
-```
-
-### Đổi Desktop Environment
-```bash
-sudo pacman -R hyprland xdg-desktop-portal-hyprland
-sudo pacman -S i3  # Hoặc gnome, xfce, ...
-```
-
-## 📦 Packages Được Cài
-
-**Base:** linux, base-devel, grub, efibootmgr  
-**Desktop:** hyprland, kitty, wofi, sddm  
-**Audio:** pipewire, wireplumber  
-**GPU:** nvidia (NVIDIA) hoặc mesa (Intel/AMD)
-
-## 📊 Tỷ Lệ Thành Công
-
+## 📊 Tỷ lệ thành công (tham khảo)
 | Kịch bản | Xác suất |
-|---------|----------|
-| Hardware mới (2020+, Ethernet, SSD) | 85-90% |
-| Hardware trung bình (2015-2019) | 65-75% |
-| VirtualBox (4GB+) | 80-85% |
-| **Trung bình** | **65-70%** |
+|---------|---------:|
+| Hardware mới (2020+, Ethernet, SSD) | 85–90% |
+| Hardware trung bình (2015–2019) | 65–75% |
+| VirtualBox (4GB+) | 80–85% |
 
-Không phải lỗi script, mà hardware/network/may mắn rất biến động.
+Không phải lỗi script luôn do hardware/mạng/ảo hoá.
 
-## 📚 Tài Liệu
+Lưu ý quan trọng: script không đảm bảo thành công 100% — kết quả phụ thuộc phần cứng, cấu hình (máy thật hoặc VM), kết nối mạng và một phần "may mắn":)) Hãy kiểm tra `/tmp/arch-install-v3.log` nếu gặp lỗi và chuẩn bị phương án dự phòng.
 
-- [Arch Wiki](https://wiki.archlinux.org/)
-- [Hyprland Docs](https://wiki.hyprland.org/)
-- [Log Script](file:///tmp/arch-install-v3.log)
+## 📚 Tài liệu
+- Arch Wiki: https://wiki.archlinux.org/
+- Hyprland Docs: https://wiki.hyprland.org/
+- Log: `file:///tmp/arch-install-v3.log`
 
 ## 📝 License
-
-FIXED V3 2025 - Arch + Hyprland Auto Install
+FIXED V3 2025 — Arch + Hyprland Auto Install
 
 ---
 
-**Mẹo:** Đọc `/tmp/arch-install-v3.log` nếu cài thất bại. Script sẽ cố sửa các vấn đề tự động.
+**Mẹo:** kiểm tra `/tmp/arch-install-v3.log` nếu cài thất bại
