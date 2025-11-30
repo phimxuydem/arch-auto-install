@@ -85,9 +85,20 @@ done
 # pacman-key init/populate if needed (avoid signature issues)
 if ! pgrep -x "gpg-agent" &>/dev/null && command -v pacman-key &>/dev/null; then
     info "Đảm bảo pacman keyring đã được khởi tạo..."
+    # initialize/populate if absent
     if [ ! -d /etc/pacman.d/gnupg ] || [ -z "$(ls -A /etc/pacman.d/gnupg 2>/dev/null || true)" ]; then
         pacman-key --init || true
         pacman-key --populate archlinux || true
+    fi
+    # Try to refresh keys proactively — helps when ISO keyring is older than the repo
+    if ! pacman-key --refresh-keys 2>/dev/null; then
+        warn "pacman-key --refresh-keys thất bại; thử cập nhật gói archlinux-keyring"
+        if command -v pacman &>/dev/null; then
+            retry_cmd pacman -Sy --noconfirm archlinux-keyring || warn "Không thể cập nhật archlinux-keyring"
+            pacman-key --populate archlinux || true
+        fi
+    else
+        info "pacman keyring refreshed"
     fi
 fi
 
@@ -273,13 +284,43 @@ sgdisk -Z "$DISK" 2>/dev/null || true
 
 # Partition layout (preserve behavior)
 progress_step "Creating partitions..."
+## Dynamic swap sizing: compute based on RAM and allow override
+RAM_KB=$(awk '/MemTotal/ {print $2}' /proc/meminfo || echo 0)
+RAM_GB=$(( (RAM_KB / 1024 / 1024) ))
+RAM_MB=$(( (RAM_KB / 1024) ))
+DEFAULT_SWAP_GB=0
+if (( RAM_GB <= 8 )); then
+    DEFAULT_SWAP_GB=$(( RAM_GB * 2 ))
+elif (( RAM_GB <= 16 )); then
+    DEFAULT_SWAP_GB=$(( RAM_GB ))
+else
+    DEFAULT_SWAP_GB=16
+fi
+
+echo -e "\nDetected RAM: ${RAM_GB}GB (${RAM_MB}MB)."
+echo -e "Suggested swap size: ${DEFAULT_SWAP_GB}GB"
+if (( RAM_GB > 32 )); then
+    warn "⚠ RAM rất lớn (>32GB). Swap hiện tại chỉ ${DEFAULT_SWAP_GB}GB."
+    echo -e "   → Nếu bạn muốn dùng hibernate, bạn cần swap ≥ RAM (${RAM_GB}GB)."
+fi
+echo -e "   (1) Nhập số GB tùy chỉnh (ví dụ: 32)"
+echo -e "   (2) Bấm Enter để dùng giá trị đề xuất (${DEFAULT_SWAP_GB}GB)"
+read -rp "→ Chọn: " SWAP_INPUT
+SWAP_INPUT=${SWAP_INPUT:-}
+if [[ -n "$SWAP_INPUT" ]] && [[ "$SWAP_INPUT" =~ ^[0-9]+$ ]]; then
+    SWAP_SIZE_GB=$SWAP_INPUT
+else
+    SWAP_SIZE_GB=$DEFAULT_SWAP_GB
+fi
+info "Using swap size: ${SWAP_SIZE_GB}GB (calculated from ${RAM_GB}GB RAM)"
+
 if [[ "$BOOT_MODE" == "uefi" ]]; then
     sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI"   "$DISK"
-    sgdisk -n 2:0:+8G   -t 2:8200 -c 2:"Swap"  "$DISK"
+    sgdisk -n 2:0:+${SWAP_SIZE_GB}G   -t 2:8200 -c 2:"Swap"  "$DISK"
     sgdisk -n 3:0:0     -t 3:8300 -c 3:"Root"  "$DISK"
 else
     sgdisk -n 1:0:+2M -t 1:EF02 -c 1:"BIOSBOOT" "$DISK"
-    sgdisk -n 2:0:+8G   -t 2:8200 -c 2:"Swap"  "$DISK"
+    sgdisk -n 2:0:+${SWAP_SIZE_GB}G   -t 2:8200 -c 2:"Swap"  "$DISK"
     sgdisk -n 3:0:0     -t 3:8300 -c 3:"Root"  "$DISK"
 fi
 
@@ -347,9 +388,28 @@ sleep 1
 if [[ "$BOOT_MODE" == "uefi" ]]; then
     mkfs.fat -F32 "$EFI" 2>/dev/null || error "Format EFI partition thất bại"
 fi
+# Show actual partition size before creating swap (detailed logging)
+if [[ -b "$SWAP" ]]; then
+    SWAP_BYTES=$(blockdev --getsize64 "$SWAP" 2>/dev/null || true)
+    if [[ -n "$SWAP_BYTES" ]] && [[ "$SWAP_BYTES" -gt 0 ]]; then
+        SWAP_ACTUAL_GB=$(( SWAP_BYTES / 1024 / 1024 / 1024 ))
+        SWAP_ACTUAL_MB=$(( SWAP_BYTES / 1024 / 1024 ))
+        info "Creating swap on $SWAP: ${SWAP_BYTES} bytes = ${SWAP_ACTUAL_GB}GB (${SWAP_ACTUAL_MB}MB)"
+    else
+        info "Creating swap on $SWAP (size could not be determined)"
+    fi
+else
+    error "Swap partition $SWAP không tồn tại"
+fi
 
-mkswap "$SWAP" 2>/dev/null || error "mkswap thất bại"
-swapon "$SWAP" 2>/dev/null || error "swapon thất bại"
+if ! mkswap "$SWAP"; then
+    error "mkswap thất bại trên $SWAP"
+fi
+info "✓ Swap partition created and formatted"
+if ! swapon "$SWAP"; then
+    error "swapon thất bại trên $SWAP"
+fi
+info "✓ Swap activated"
 mkfs.ext4 -F "$ROOT" 2>/dev/null || error "Format root partition thất bại"
 
 # mount
@@ -546,6 +606,17 @@ else
     info "NVIDIA GPU detected (from parent) - cài driver..."
 fi
 
+# Ensure build deps for AUR are present (base-devel, git, make)
+info "Đảm bảo build dependencies (base-devel, git, make) có sẵn..."
+BUILD_DEPS=(base-devel git make)
+for dep in "${BUILD_DEPS[@]}"; do
+    if ! pacman -Sy --noconfirm "$dep" 2>/dev/null; then
+        warn "Không thể cài build-dep '$dep' — AUR build có thể gặp lỗi thiếu dependency này"
+    else
+        info "✓ Build-dep '$dep' available"
+    fi
+done
+
 # core packages
 info "Cài đặt Hyprland và packages chính..."
 if [[ $HAS_NVIDIA -eq 1 ]]; then
@@ -600,15 +671,70 @@ if [[ "$BOOT_MODE" == "uefi" ]]; then
         ROOT_UUID=$(blkid -s UUID -o value "$ROOT" 2>/dev/null || echo "")
         mkdir -p /boot/loader/entries
 
-        # verify kernel/initramfs exist under /boot
-        if [[ -f /boot/vmlinuz-linux ]] && [[ -f /boot/initramfs-linux.img ]]; then
-            KPATH="/vmlinuz-linux"
-            IPATH="/initramfs-linux.img"
-        elif [[ -f /vmlinuz-linux ]] && [[ -f /initramfs-linux.img ]]; then
-            KPATH="/vmlinuz-linux"
-            IPATH="/initramfs-linux.img"
+        # Robust kernel/initramfs detection: prefer newest vmlinuz* in /boot and matching initramfs-*.img
+        find_kernel_initramfs(){
+            # Look for vmlinuz files in /boot or root (sorted by timestamp, newest first)
+            local kf ifile suffix candidate_k candidate_i all_kernels
+            # Use ls -1t to get files sorted by modification time (newest first)
+            all_kernels=$(ls -1t /boot/vmlinuz* 2>/dev/null || true)
+            if [[ -z "$all_kernels" ]]; then
+                all_kernels=$(ls -1t /vmlinuz* 2>/dev/null || true)
+            fi
+            # Select newest kernel (first item after sort by timestamp)
+            candidate_k=$(echo "$all_kernels" | head -n1 || true)
+            
+            info "DEBUG: Available kernels in /boot: $(echo "$all_kernels" | tr '\n' ', ' | sed 's/,$//')"
+            
+            if [[ -n "$candidate_k" ]]; then
+                kf=$(basename "$candidate_k")
+                # extract suffix after vmlinuz- or use 'linux' if name is vmlinuz-linux
+                if [[ "$kf" =~ ^vmlinuz-(.+)$ ]]; then
+                    suffix="${BASH_REMATCH[1]}"
+                else
+                    # try remove leading vmlinuz-
+                    suffix="${kf#vmlinuz-}"
+                fi
+                
+                info "DEBUG: Selected kernel: $kf (kernel type: $suffix)"
+                
+                # try to find matching initramfs
+                if [[ -f "/boot/initramfs-${suffix}.img" ]]; then
+                    ifile="/boot/initramfs-${suffix}.img"
+                    info "DEBUG: Matched initramfs: /boot/initramfs-${suffix}.img"
+                elif [[ -f "/initramfs-${suffix}.img" ]]; then
+                    ifile="/initramfs-${suffix}.img"
+                    info "DEBUG: Matched initramfs (root): /initramfs-${suffix}.img"
+                else
+                    # fallback to newest initramfs image
+                    warn "DEBUG: No exact match for initramfs-${suffix}.img, using fallback"
+                    ifile=$(ls -1t /boot/initramfs-*.img 2>/dev/null | head -n1 || true)
+                    if [[ -z "$ifile" ]]; then
+                        ifile=$(ls -1t /initramfs-*.img 2>/dev/null | head -n1 || true)
+                    fi
+                    [[ -n "$ifile" ]] && info "DEBUG: Fallback initramfs: $ifile"
+                fi
+                # set outputs (strip leading /boot for loader entries if necessary)
+                KPATH="$candidate_k"
+                IPATH="$ifile"
+            else
+                KPATH=""
+                IPATH=""
+            fi
+        }
+
+        find_kernel_initramfs
+        if [[ -n "$KPATH" ]] && [[ -n "$IPATH" ]]; then
+            # For systemd-boot entries, use paths relative to /boot if files are under /boot
+            if [[ "$KPATH" == /boot/* ]]; then
+                KPATH="${KPATH#/boot}"
+            fi
+            if [[ "$IPATH" == /boot/* ]]; then
+                IPATH="${IPATH#/boot}"
+            fi
+            info "✓ Detected & using kernel: $(basename "$candidate_k") with initramfs: $(basename "$IPATH")"
         else
-            warn "Không tìm thấy kernel hoặc initramfs trong /boot; sẽ KHÔNG tạo entry systemd-boot"
+            warn "Không tìm thấy kernel/initramfs phù hợp trong /boot — sẽ dùng default filenames"
+            info "DEBUG: KPATH=$KPATH, IPATH=$IPATH"
             KPATH="/vmlinuz-linux"
             IPATH="/initramfs-linux.img"
         fi
@@ -697,30 +823,74 @@ if ! ping -c 1 -W 2 8.8.8.8 &>/dev/null; then
     exit 0
 fi
 
+# Define AUR packages list (easily customizable)
+AUR_PACKAGES=(
+    "hyprland" "wlogout" "waypaper" "waybar" "swww" "rofi-wayland" "swaync"
+    "nemo" "kitty" "pavucontrol" "gtk3" "gtk2" "xcur2png" "gsettings"
+    "nwg-look" "fastfetch" "zsh" "oh-my-zsh-git" "hyprshot"
+    "networkmanager" "networkmanager-qt" "nm-connection-editor"
+    "ttf-firacode-nerd" "nerd-fonts-jetbrains-mono"
+)
+
+# If yay is missing, attempt to build it. Ensure the system has build deps (best-effort)
+echo "[+] Preparing to build yay if not present"
 if ! command -v yay &>/dev/null; then
-    echo "[+] Building yay from AUR..."
-    if git clone --depth 1 https://aur.archlinux.org/yay.git /tmp/yay 2>/dev/null && cd /tmp/yay; then
-        if [[ -f PKGBUILD ]]; then
-            if makepkg -si --noconfirm 2>&1 | tail -5; then
-                echo "[+] yay installed successfully"
+    echo "[+] Building yay from AUR (will try up to 3 times)"
+    MAX_TRIES=3
+    TRY=1
+    BUILT=0
+    while (( TRY <= MAX_TRIES )); do
+        echo "[+] yay build attempt ${TRY}/${MAX_TRIES}"
+        rm -rf /tmp/yay 2>/dev/null || true
+        if git clone --depth 1 https://aur.archlinux.org/yay.git /tmp/yay 2>/dev/null && cd /tmp/yay; then
+            if [[ -f PKGBUILD ]]; then
+                if makepkg -si --noconfirm 2>&1 | tee /tmp/yay_build_${TRY}.log; then
+                    echo "[+] yay installed successfully on attempt ${TRY}"
+                    BUILT=1
+                    break
+                else
+                    echo "[!] makepkg failed on attempt ${TRY}. Log saved: /tmp/yay_build_${TRY}.log"
+                    tail -20 /tmp/yay_build_${TRY}.log 2>/dev/null || true
+                fi
             else
-                echo "[!] yay build failed - skipping AUR packages"
+                echo "[!] PKGBUILD not found in cloned yay repository"
             fi
+        else
+            echo "[!] git clone failed on attempt ${TRY}"
         fi
-        cd / && rm -rf /tmp/yay 2>/dev/null || true
-    else
-        echo "[!] git clone failed - skipping yay"
+        TRY=$((TRY+1))
+        [[ $TRY -le $MAX_TRIES ]] && sleep 3
+    done
+    if [[ $BUILT -ne 1 ]]; then
+        echo "[ERROR] Failed to build yay after ${MAX_TRIES} attempts. Logs available in /tmp/yay_build_*.log"
+        echo "[ERROR] AUR packages will NOT be installed automatically. Please inspect logs and build manually."
     fi
+    cd / && rm -rf /tmp/yay 2>/dev/null || true
 fi
 
-# install AUR packages (best-effort)
+# install AUR packages (best-effort) — only if yay is available
 if command -v yay &>/dev/null; then
-    yay -S --noconfirm --needed \
-        hyprland wlogout waypaper waybar swww rofi-wayland swaync nemo kitty pavucontrol \
-        gtk3 gtk2 xcur2png gsettings nwg-look fastfetch zsh oh-my-zsh-git hyprshot \
-        networkmanager networkmanager-qt nm-connection-editor \
-        ttf-firacode-nerd nerd-fonts-jetbrains-mono 2>/dev/null || echo "[!] Some AUR packages failed"
+    echo "[+] Installing AUR packages via yay..."
+    FAILED_PACKAGES=()
+    for pkg in "${AUR_PACKAGES[@]}"; do
+        echo "[+] Installing $pkg..."
+        if yay -S --noconfirm --needed "$pkg" 2>&1 | tee /tmp/aur_${pkg}.log; then
+            echo "[+] ✓ $pkg installed"
+        else
+            echo "[!] Failed to install $pkg. Log: /tmp/aur_${pkg}.log"
+            FAILED_PACKAGES+=("$pkg")
+        fi
+    done
+    if (( ${#FAILED_PACKAGES[@]} > 0 )); then
+        echo "[!] Failed AUR packages: ${FAILED_PACKAGES[*]}"
+        echo "[!] Logs available in /tmp/aur_<package>.log for debugging"
+    else
+        echo "[+] ✓ All AUR packages installed successfully"
+    fi
+else
+    echo "[!] yay not available — skipping AUR packages"
 fi
+
 # clone PilkDots config repo (after packages installed)
 if git clone --depth 1 https://github.com/PilkDrinker/PilkDots.git /tmp/PilkDots 2>/dev/null; then
     mkdir -p "$HOME/.config" 2>/dev/null || true
