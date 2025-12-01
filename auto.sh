@@ -722,22 +722,10 @@ if [[ "$BOOT_MODE" == "uefi" ]]; then
             fi
         }
 
-        find_kernel_initramfs
-        if [[ -n "$KPATH" ]] && [[ -n "$IPATH" ]]; then
-            # For systemd-boot entries, use paths relative to /boot if files are under /boot
-            if [[ "$KPATH" == /boot/* ]]; then
-                KPATH="${KPATH#/boot}"
-            fi
-            if [[ "$IPATH" == /boot/* ]]; then
-                IPATH="${IPATH#/boot}"
-            fi
-            info "✓ Detected & using kernel: $(basename "$candidate_k") with initramfs: $(basename "$IPATH")"
-        else
-            warn "Không tìm thấy kernel/initramfs phù hợp trong /boot — sẽ dùng default filenames"
-            info "DEBUG: KPATH=$KPATH, IPATH=$IPATH"
-            KPATH="/vmlinuz-linux"
-            IPATH="/initramfs-linux.img"
-        fi
+        # Kernel detection will be done AFTER mkinitcpio -P in the outer script
+        # For now, use default paths that will be updated later
+        KPATH="/vmlinuz-linux"
+        IPATH="/initramfs-linux.img"
 
         if [[ -n "$ROOT_UUID" ]]; then
             cat > /boot/loader/entries/arch.conf <<LOADER
@@ -825,7 +813,7 @@ fi
 
 # Define AUR packages list (easily customizable)
     AUR_PACKAGES=(
-    "hyprland" "hyprgrass" "wlogout" "waypaper" "waybar" "swww" "rofi-wayland" "swaync"
+    "hyprgrass" "wlogout" "waypaper" "waybar" "swww" "rofi-wayland" "swaync"
     "nemo" "kitty" "pavucontrol" "gtk3" "gtk2" "xcur2png" "gsettings"
     "nwg-look" "fastfetch" "zsh" "oh-my-zsh-git" "hyprshot"
     "networkmanager" "networkmanager-qt" "nm-connection-editor"
@@ -846,9 +834,13 @@ if ! command -v yay &>/dev/null; then
         if git clone --depth 1 https://aur.archlinux.org/yay.git /tmp/yay 2>/dev/null && cd /tmp/yay; then
             if [[ -f PKGBUILD ]]; then
                 if makepkg -si --noconfirm 2>&1 | tee /tmp/yay_build_${TRY}.log; then
-                    echo "[+] yay đã cài thành công sau lần thử ${TRY}"
-                    BUILT=1
-                    break
+                    if command -v yay &>/dev/null; then
+                        echo "[+] yay đã cài thành công sau lần thử ${TRY}"
+                        BUILT=1
+                        break
+                    else
+                        echo "[!] makepkg returned success nhưng yay không được tìm thấy — không phải cài đúng"
+                    fi
                 else
                     echo "[!] makepkg thất bại ở lần thử ${TRY}. Log lưu tại: /tmp/yay_build_${TRY}.log"
                     tail -20 /tmp/yay_build_${TRY}.log 2>/dev/null || true
@@ -1028,6 +1020,52 @@ fi
 info "Rebuild initramfs với modules mới..."
 if ! arch-chroot /mnt mkinitcpio -P; then
     error "mkinitcpio failed! Hệ thống sẽ KHÔNG boot được. Kiểm tra error trên."
+fi
+
+# FIX #2: NOW detect kernel/initramfs AFTER mkinitcpio -P has run
+info "Detecting kernel/initramfs files after mkinitcpio rebuild..."
+DETECTED_KERNEL=$(arch-chroot /mnt bash -c '
+ls -1t /boot/vmlinuz* 2>/dev/null | head -n1 || echo ""
+')
+DETECTED_KERNEL="${DETECTED_KERNEL%%$'\n'}"  # remove trailing newlines
+
+if [[ -n "$DETECTED_KERNEL" ]]; then
+    KERNEL_BASENAME=$(basename "$DETECTED_KERNEL")
+    if [[ "$KERNEL_BASENAME" =~ ^vmlinuz-(.+)$ ]]; then
+        KERNEL_SUFFIX="${BASH_REMATCH[1]}"
+    else
+        KERNEL_SUFFIX="${KERNEL_BASENAME#vmlinuz-}"
+    fi
+    
+    # Check for matching initramfs
+    DETECTED_INITRAMFS=$(arch-chroot /mnt bash -c "
+[[ -f /boot/initramfs-${KERNEL_SUFFIX}.img ]] && echo /boot/initramfs-${KERNEL_SUFFIX}.img || \
+    (ls -1t /boot/initramfs-*.img 2>/dev/null | head -n1 || echo '')
+")
+    DETECTED_INITRAMFS="${DETECTED_INITRAMFS%%$'\n'}"
+    
+    if [[ -n "$DETECTED_INITRAMFS" ]]; then
+        # Update boot loader configuration if using systemd-boot
+        if [[ -f /mnt/boot/loader/entries/arch.conf ]]; then
+            # Remove leading /boot/ for systemd-boot entries
+            KERNEL_PATH="${DETECTED_KERNEL#/mnt/boot}"
+            INITRAMFS_PATH="${DETECTED_INITRAMFS#/mnt/boot}"
+            [[ "$KERNEL_PATH" != /* ]] && KERNEL_PATH="/$KERNEL_PATH"
+            [[ "$INITRAMFS_PATH" != /* ]] && INITRAMFS_PATH="/$INITRAMFS_PATH"
+            
+            # Update arch.conf with detected kernel
+            ROOT_UUID=$(blkid -s UUID -o value "$ROOT" 2>/dev/null || echo "")
+            if [[ -n "$ROOT_UUID" ]]; then
+                cat > /mnt/boot/loader/entries/arch.conf <<LOADER
+title   Arch Linux
+linux   $KERNEL_PATH
+initrd  $INITRAMFS_PATH
+options root=UUID="$ROOT_UUID" rw
+LOADER
+            fi
+            info "✓ Updated systemd-boot with detected kernel: $(basename "$DETECTED_KERNEL")"
+        fi
+    fi
 fi
 
 # cleanup
