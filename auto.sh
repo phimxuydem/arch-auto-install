@@ -98,7 +98,7 @@ if ! pgrep -x "gpg-agent" &>/dev/null && command -v pacman-key &>/dev/null; then
             pacman-key --populate archlinux || true
         fi
     else
-        info "pacman keyring refreshed"
+        info "Đã làm mới pacman keyring"
     fi
 fi
 
@@ -111,7 +111,7 @@ if [[ -f /etc/pacman.conf ]]; then
             s/^\s*#\s*\(\[multilib\]\)/\1/
             s/^\s*#\s*\(Include.*\/etc\/pacman.d\/mirrorlist\)/\1/
         }' /etc/pacman.conf || true
-        info "Uncommented [multilib] section in pacman.conf"
+        info "Đã bỏ comment phần [multilib] trong pacman.conf"
     fi
 fi
 
@@ -312,7 +312,7 @@ if [[ -n "$SWAP_INPUT" ]] && [[ "$SWAP_INPUT" =~ ^[0-9]+$ ]]; then
 else
     SWAP_SIZE_GB=$DEFAULT_SWAP_GB
 fi
-info "Using swap size: ${SWAP_SIZE_GB}GB (calculated from ${RAM_GB}GB RAM)"
+info "Sử dụng swap: ${SWAP_SIZE_GB}GB (tính từ ${RAM_GB}GB RAM)"
 
 if [[ "$BOOT_MODE" == "uefi" ]]; then
     sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"EFI"   "$DISK"
@@ -376,7 +376,7 @@ for partition in "${ROOT}" "${SWAP}" "${EFI:-}" "${BIOSBOOT:-}"; do
 done
 info "✓ Tất cả partitions đã sẵn sàng"
 
-info "Format partition(s), swap, root..."
+info "Đang format phân vùng (swap, root, ... )"
 progress_step "Formatting filesystems..."
 umount -R /mnt 2>/dev/null || true
 swapoff -a 2>/dev/null || true
@@ -394,9 +394,9 @@ if [[ -b "$SWAP" ]]; then
     if [[ -n "$SWAP_BYTES" ]] && [[ "$SWAP_BYTES" -gt 0 ]]; then
         SWAP_ACTUAL_GB=$(( SWAP_BYTES / 1024 / 1024 / 1024 ))
         SWAP_ACTUAL_MB=$(( SWAP_BYTES / 1024 / 1024 ))
-        info "Creating swap on $SWAP: ${SWAP_BYTES} bytes = ${SWAP_ACTUAL_GB}GB (${SWAP_ACTUAL_MB}MB)"
+        info "Tạo swap trên $SWAP: ${SWAP_BYTES} bytes = ${SWAP_ACTUAL_GB}GB (${SWAP_ACTUAL_MB}MB)"
     else
-        info "Creating swap on $SWAP (size could not be determined)"
+        info "Tạo swap trên $SWAP (không xác định được kích thước)"
     fi
 else
     error "Swap partition $SWAP không tồn tại"
@@ -413,14 +413,14 @@ info "✓ Swap activated"
 mkfs.ext4 -F "$ROOT" 2>/dev/null || error "Format root partition thất bại"
 
 # mount
-mount "$ROOT" /mnt || error "Mount root partition failed"
-mkdir -p /mnt/etc /mnt/boot || error "Cannot create /mnt directories"
+    mount "$ROOT" /mnt || error "Mount phân vùng root thất bại"
+    mkdir -p /mnt/etc /mnt/boot || error "Không thể tạo thư mục /mnt"
 
 if [[ "$BOOT_MODE" == "uefi" ]]; then
-    mkdir -p /mnt/boot || error "Cannot create /mnt/boot directory"
+    mkdir -p /mnt/boot || error "Không thể tạo thư mục /mnt/boot"
     mount --mkdir "$EFI" /mnt/boot || error "Mount EFI thất bại"
 else
-    mkdir -p /mnt/boot || error "Cannot create /mnt/boot directory"
+    mkdir -p /mnt/boot || error "Không thể tạo thư mục /mnt/boot"
 fi
 
 # FIX #3: Generate fstab and validate content
@@ -522,7 +522,7 @@ if grep -q '^\s*#\s*\[multilib\]' /etc/pacman.conf; then
         s/^\s*#\s*\(\[multilib\]\)/\1/
         s/^\s*#\s*\(Include.*\/etc\/pacman.d\/mirrorlist\)/\1/
     }' /etc/pacman.conf || true
-    pacman -Syu --noconfirm 2>/dev/null || warn "pacman sync update failed in chroot"
+    pacman -Syu --noconfirm 2>/dev/null || warn "Cập nhật pacman sync trong chroot thất bại"
 else
     info "multilib already enabled"
 fi
@@ -613,7 +613,7 @@ for dep in "${BUILD_DEPS[@]}"; do
     if ! pacman -Sy --noconfirm "$dep" 2>/dev/null; then
         warn "Không thể cài build-dep '$dep' — AUR build có thể gặp lỗi thiếu dependency này"
     else
-        info "✓ Build-dep '$dep' available"
+        info "✓ Build-dep '$dep' có sẵn"
     fi
 done
 
@@ -683,7 +683,7 @@ if [[ "$BOOT_MODE" == "uefi" ]]; then
             # Select newest kernel (first item after sort by timestamp)
             candidate_k=$(echo "$all_kernels" | head -n1 || true)
             
-            info "DEBUG: Available kernels in /boot: $(echo "$all_kernels" | tr '\n' ', ' | sed 's/,$//')"
+            info "DEBUG: Kernel khả dụng trong /boot: $(echo "$all_kernels" | tr '\n' ', ' | sed 's/,$//')"
             
             if [[ -n "$candidate_k" ]]; then
                 kf=$(basename "$candidate_k")
@@ -695,23 +695,23 @@ if [[ "$BOOT_MODE" == "uefi" ]]; then
                     suffix="${kf#vmlinuz-}"
                 fi
                 
-                info "DEBUG: Selected kernel: $kf (kernel type: $suffix)"
+                info "DEBUG: Đã chọn kernel: $kf (loại kernel: $suffix)"
                 
                 # try to find matching initramfs
                 if [[ -f "/boot/initramfs-${suffix}.img" ]]; then
                     ifile="/boot/initramfs-${suffix}.img"
-                    info "DEBUG: Matched initramfs: /boot/initramfs-${suffix}.img"
+                    info "DEBUG: Tìm thấy initramfs phù hợp: /boot/initramfs-${suffix}.img"
                 elif [[ -f "/initramfs-${suffix}.img" ]]; then
                     ifile="/initramfs-${suffix}.img"
-                    info "DEBUG: Matched initramfs (root): /initramfs-${suffix}.img"
+                    info "DEBUG: Tìm thấy initramfs (root): /initramfs-${suffix}.img"
                 else
                     # fallback to newest initramfs image
-                    warn "DEBUG: No exact match for initramfs-${suffix}.img, using fallback"
+                    warn "DEBUG: Không tìm thấy initramfs-${suffix}.img chính xác — dùng fallback"
                     ifile=$(ls -1t /boot/initramfs-*.img 2>/dev/null | head -n1 || true)
                     if [[ -z "$ifile" ]]; then
                         ifile=$(ls -1t /initramfs-*.img 2>/dev/null | head -n1 || true)
                     fi
-                    [[ -n "$ifile" ]] && info "DEBUG: Fallback initramfs: $ifile"
+                    [[ -n "$ifile" ]] && info "DEBUG: initramfs fallback: $ifile"
                 fi
                 # set outputs (strip leading /boot for loader entries if necessary)
                 KPATH="$candidate_k"
@@ -819,13 +819,13 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # Quick internet check in chroot
 if ! ping -c 1 -W 2 8.8.8.8 &>/dev/null; then
-    echo "[!] No internet in chroot - skipping AUR packages"
+    echo "[!] Không có Internet trong chroot - bỏ qua cài AUR packages"
     exit 0
 fi
 
 # Define AUR packages list (easily customizable)
-AUR_PACKAGES=(
-    "hyprland" "wlogout" "waypaper" "waybar" "swww" "rofi-wayland" "swaync"
+    AUR_PACKAGES=(
+    "hyprland" "hyprgrass" "wlogout" "waypaper" "waybar" "swww" "rofi-wayland" "swaync"
     "nemo" "kitty" "pavucontrol" "gtk3" "gtk2" "xcur2png" "gsettings"
     "nwg-look" "fastfetch" "zsh" "oh-my-zsh-git" "hyprshot"
     "networkmanager" "networkmanager-qt" "nm-connection-editor"
@@ -833,74 +833,109 @@ AUR_PACKAGES=(
 )
 
 # If yay is missing, attempt to build it. Ensure the system has build deps (best-effort)
-echo "[+] Preparing to build yay if not present"
+echo "[+] Chuẩn bị build/cài yay nếu chưa có"
+echo "[!] LƯU Ý: Trình trợ giúp AUR (ví dụ: yay) PHẢI chạy dưới user thường, không chạy dưới root — block này chạy dưới: $USER"
 if ! command -v yay &>/dev/null; then
-    echo "[+] Building yay from AUR (will try up to 3 times)"
+    echo "[+] Đang build cài yay từ AUR (sẽ thử tối đa 3 lần)"
     MAX_TRIES=3
     TRY=1
     BUILT=0
     while (( TRY <= MAX_TRIES )); do
-        echo "[+] yay build attempt ${TRY}/${MAX_TRIES}"
+        echo "[+] Thử build yay (${TRY}/${MAX_TRIES})"
         rm -rf /tmp/yay 2>/dev/null || true
         if git clone --depth 1 https://aur.archlinux.org/yay.git /tmp/yay 2>/dev/null && cd /tmp/yay; then
             if [[ -f PKGBUILD ]]; then
                 if makepkg -si --noconfirm 2>&1 | tee /tmp/yay_build_${TRY}.log; then
-                    echo "[+] yay installed successfully on attempt ${TRY}"
+                    echo "[+] yay đã cài thành công sau lần thử ${TRY}"
                     BUILT=1
                     break
                 else
-                    echo "[!] makepkg failed on attempt ${TRY}. Log saved: /tmp/yay_build_${TRY}.log"
+                    echo "[!] makepkg thất bại ở lần thử ${TRY}. Log lưu tại: /tmp/yay_build_${TRY}.log"
                     tail -20 /tmp/yay_build_${TRY}.log 2>/dev/null || true
                 fi
             else
-                echo "[!] PKGBUILD not found in cloned yay repository"
+                echo "[!] Không tìm thấy PKGBUILD trong repo yay đã clone"
             fi
         else
-            echo "[!] git clone failed on attempt ${TRY}"
+            echo "[!] git clone thất bại ở lần thử ${TRY}"
         fi
         TRY=$((TRY+1))
         [[ $TRY -le $MAX_TRIES ]] && sleep 3
     done
     if [[ $BUILT -ne 1 ]]; then
-        echo "[ERROR] Failed to build yay after ${MAX_TRIES} attempts. Logs available in /tmp/yay_build_*.log"
-        echo "[ERROR] AUR packages will NOT be installed automatically. Please inspect logs and build manually."
+        echo "[ERROR] Build yay thất bại sau ${MAX_TRIES} lần thử. Logs: /tmp/yay_build_*.log"
+        echo "[ERROR] Các gói AUR sẽ KHÔNG được cài tự động. Vui lòng kiểm tra logs và build thủ công."
     fi
     cd / && rm -rf /tmp/yay 2>/dev/null || true
 fi
 
 # install AUR packages (best-effort) — only if yay is available
-if command -v yay &>/dev/null; then
-    echo "[+] Installing AUR packages via yay..."
+    if command -v yay &>/dev/null; then
+    echo "[+] Đang cài các gói AUR bằng yay..."
     FAILED_PACKAGES=()
     for pkg in "${AUR_PACKAGES[@]}"; do
-        echo "[+] Installing $pkg..."
+        echo "[+] Đang cài $pkg..."
         if yay -S --noconfirm --needed "$pkg" 2>&1 | tee /tmp/aur_${pkg}.log; then
-            echo "[+] ✓ $pkg installed"
+            echo "[+] ✓ Đã cài $pkg"
         else
-            echo "[!] Failed to install $pkg. Log: /tmp/aur_${pkg}.log"
+            echo "[!] Cài $pkg thất bại. Log: /tmp/aur_${pkg}.log"
             FAILED_PACKAGES+=("$pkg")
         fi
     done
     if (( ${#FAILED_PACKAGES[@]} > 0 )); then
-        echo "[!] Failed AUR packages: ${FAILED_PACKAGES[*]}"
-        echo "[!] Logs available in /tmp/aur_<package>.log for debugging"
+        echo "[!] Các gói AUR cài thất bại: ${FAILED_PACKAGES[*]}"
+        echo "[!] Log có sẵn trong /tmp/aur_<package>.log để debug"
     else
-        echo "[+] ✓ All AUR packages installed successfully"
+        echo "[+] ✓ Tất cả các gói AUR đã cài thành công"
     fi
 else
-    echo "[!] yay not available — skipping AUR packages"
+    echo "[!] yay không có — bỏ qua cài các gói AUR"
 fi
 
 # clone PilkDots config repo (after packages installed)
-if git clone --depth 1 https://github.com/PilkDrinker/PilkDots.git /tmp/PilkDots 2>/dev/null; then
-    mkdir -p "$HOME/.config" 2>/dev/null || true
-    cp -r /tmp/PilkDots/.config/* "$HOME/.config/" 2>/dev/null || true
-    chown -R "$USER":"$USER" "$HOME/.config" 2>/dev/null || true
+    if git clone --depth 1 https://github.com/dhungx/PilkDots.git /tmp/PilkDots 2>/dev/null; then
+    # Use rsync (ignore-existing) to avoid overwriting user customizations
+    mkdir -p "$HOME/.config" "$HOME/.themes" "$HOME/wallpaper" 2>/dev/null || true
+
+    # Copy only if new (don't overwrite), preserve ownership and permissions
+    if command -v rsync &>/dev/null; then
+        rsync -a --ignore-existing /tmp/PilkDots/.config/ "$HOME/.config/" 2>/dev/null || true
+        rsync -a --ignore-existing /tmp/PilkDots/.themes/ "$HOME/.themes/" 2>/dev/null || true
+        rsync -a --ignore-existing /tmp/PilkDots/wallpaper/ "$HOME/wallpaper/" 2>/dev/null || true
+    else
+        # fallback to cp -n (no clobber) if rsync not available
+        cp -rn /tmp/PilkDots/.config/* "$HOME/.config/" 2>/dev/null || true
+        cp -rn /tmp/PilkDots/.themes/* "$HOME/.themes/" 2>/dev/null || true
+        cp -rn /tmp/PilkDots/wallpaper/* "$HOME/wallpaper/" 2>/dev/null || true
+    fi
+
+    # If a hyprland config exists, sanitize unsupported options to prevent startup crashes
+    HYPR_CONF="$HOME/.config/hypr/hyprland.conf"
+            if [[ -f "$HYPR_CONF" ]]; then
+        # create a safe backup
+        cp -a "$HYPR_CONF" "$HYPR_CONF.pildots.bak" 2>/dev/null || true
+
+        # If the file contains 'gestures' options (e.g. gestures:workspace_swipe) comment them
+            if grep -qi "gestures" "$HYPR_CONF" 2>/dev/null; then
+            echo "[+] Phát hiện tuỳ chọn gestures trong $HYPR_CONF — đã comment để tương thích"
+            sed -i.bak -E 's/^([[:space:]]*.*gestures:.*)$/#\1/; s/gestures:workspace_swipe/#&/Ig' "$HYPR_CONF" 2>/dev/null || true
+            echo "[+] Đã tạo bản sao lưu gốc: ${HYPR_CONF}.pildots.bak"
+            fi
+
+            # Small guidance to the end-user in the chroot/user context
+            echo "[!] PilkDots hyprland config sanitized — unsupported gestures lines were commented out."
+            echo "[!] Để bật lại gestures: nâng cấp Hyprland lên phiên bản hỗ trợ (ví dụ hyprland-git), sau đó khôi phục bản backup: ${HYPR_CONF}.pildots.bak"
+
+        # If you want to restore the original config later: ~/..hyprland.conf.pildots.bak
+    fi
+
+    # Ensure ownership set for the user's files
+    chown -R "$USER":"$USER" "$HOME/.config" "$HOME/.themes" "$HOME/wallpaper" 2>/dev/null || true
     rm -rf /tmp/PilkDots 2>/dev/null || true
 fi
 
 # apply wal if available (best-effort)
-wal -i /usr/share/backgrounds/archlinux/archwave.png 2>/dev/null || echo "[!] wal configuration failed"
+wal -i /usr/share/backgrounds/archlinux/archwave.png 2>/dev/null || echo "[!] Áp dụng wal thất bại"
 ENDUSER
 
 # sddm theme config (with fallback if theme not available)
@@ -908,11 +943,11 @@ mkdir -p /etc/sddm.conf.d || true
 if [[ -d /usr/share/sddm/themes/catppuccin-mocha ]]; then
     SDDM_THEME="catppuccin-mocha"
 else
-    warn "catppuccin-mocha theme not available, using default"
+    warn "Theme catppuccin-mocha không có, dùng theme mặc định"
     SDDM_THEME="default"
 fi
 
-cat > /etc/sddm.conf.d/kde_settings.conf <<SDDM || warn "Cannot write SDDM config"
+cat > /etc/sddm.conf.d/kde_settings.conf <<SDDM || warn "Không thể ghi cấu hình SDDM"
 [Theme]
 Current=$SDDM_THEME
 
@@ -922,7 +957,7 @@ SDDM
 
 # hyprland session file
 mkdir -p /usr/share/wayland-sessions || true
-cat > /usr/share/wayland-sessions/hyprland.desktop <<DESKTOP || warn "Cannot write Hyprland session file"
+cat > /usr/share/wayland-sessions/hyprland.desktop <<DESKTOP || warn "Không thể ghi file session Hyprland"
 [Desktop Entry]
 Name=Hyprland
 Comment=A dynamic tiling Wayland compositor
@@ -937,10 +972,10 @@ if [[ ! -f "$ZSHRC" ]]; then
     chown "$USERNAME:$USERNAME" "$ZSHRC" 2>/dev/null || true
 fi
 if [[ $IS_VM == "oracle" ]]; then
-    echo 'export WLR_NO_HARDWARE_CURSORS=1' >> "$ZSHRC" 2>/dev/null || warn "Cannot write VirtualBox env var to .zshrc"
+    echo 'export WLR_NO_HARDWARE_CURSORS=1' >> "$ZSHRC" 2>/dev/null || warn "Không thể ghi biến VirtualBox vào .zshrc"
 fi
 if [[ $HAS_NVIDIA -eq 1 ]]; then
-    cat >> "$ZSHRC" <<NV 2>/dev/null || warn "Cannot write NVIDIA env vars to .zshrc"
+    cat >> "$ZSHRC" <<NV 2>/dev/null || warn "Không thể ghi biến môi trường NVIDIA vào .zshrc"
 export GBM_BACKEND=nvidia-drm
 export __GLX_VENDOR_LIBRARY_NAME=nvidia
 export LIBVA_DRIVER_NAME=nvidia
@@ -951,7 +986,7 @@ chown "$USERNAME:$USERNAME" "$ZSHRC" 2>/dev/null || true
 
 # Set zsh as default shell if available
 if [[ -x /usr/bin/zsh ]]; then
-    chsh -s /usr/bin/zsh "$USERNAME" 2>/dev/null || warn "chsh failed for $USERNAME"
+    chsh -s /usr/bin/zsh "$USERNAME" 2>/dev/null || warn "chsh thay shell mặc định thất bại cho $USERNAME"
 else
     warn "zsh not installed, keeping default shell"
 fi

@@ -100,7 +100,7 @@ DEBUG: Matched initramfs: /boot/initramfs-linux-lts.img
 **B. Danh sách gói AUR tùy chỉnh:**
 ```bash
 AUR_PACKAGES=(
-    "hyprland" "wlogout" "waypaper" "waybar" "swww" "rofi-wayland" "swaync"
+    "hyprland" "hyprgrass" "wlogout" "waypaper" "waybar" "swww" "rofi-wayland" "swaync"
     "nemo" "kitty" "pavucontrol" "gtk3" "gtk2" "xcur2png" "gsettings"
     "nwg-look" "fastfetch" "zsh" "oh-my-zsh-git" "hyprshot"
     "networkmanager" "networkmanager-qt" "nm-connection-editor"
@@ -320,7 +320,7 @@ DEBUG: Matched initramfs: /boot/initramfs-linux-lts.img
 **Tùy chỉnh gói:**
 ```bash
 AUR_PACKAGES=(
-    "hyprland"              # Keep
+    "hyprland" "hyprgrass" # Keep
     "new-package-here"      # Add
     # "remove-by-commenting" # Skip
 )
